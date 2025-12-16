@@ -103,6 +103,8 @@ async def test_project(dut):
 
     # Start capturing
 
+    os.makedirs("test", exist_ok=True)
+    os.makedirs("test/results", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
     for i in range(CAPTURE_FRAMES):
