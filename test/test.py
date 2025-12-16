@@ -38,19 +38,19 @@ async def test_project(dut):
     CAPTURE_FRAMES = 3
 
     H_SYNC_START = H_DISPLAY + H_FRONT
-    H_SYNC_END   = H_SYNC_START + H_SYNC
-    H_TOTAL      = H_SYNC_END + H_BACK
+    H_SYNC_END = H_SYNC_START + H_SYNC
+    H_TOTAL = H_SYNC_END + H_BACK
 
     V_SYNC_START = V_DISPLAY + V_FRONT
-    V_SYNC_END   = V_SYNC_START + V_SYNC
-    V_TOTAL      = V_SYNC_END + V_BACK
+    V_SYNC_END = V_SYNC_START + V_SYNC
+    V_TOTAL = V_SYNC_END + V_BACK
 
-    # uo_out = {hsync, B0, G0, R0, vsync, B1, G1, R1}
+    # Palette mapping: uses only color bits in uo_out (mask out hsync/vsync)
     palette = [b"\x00\x00\x00"] * 256
     for r1, r0, g1, g0, b1, b0 in itertools.product(range(2), repeat=6):
-        red   = 170 * r1 + 85 * r0
+        red = 170 * r1 + 85 * r0
         green = 170 * g1 + 85 * g0
-        blue  = 170 * b1 + 85 * b0
+        blue = 170 * b1 + 85 * b0
         idx = (b0 << 6) | (g0 << 5) | (r0 << 4) | (b1 << 2) | (g1 << 1) | (r1 << 0)
         palette[idx] = bytes((red, green, blue))
 
@@ -80,25 +80,29 @@ async def test_project(dut):
             assert hsync == (1 if H_SYNC_START <= i < H_SYNC_END else 0), "Unexpected hsync pattern"
             assert vsync == 0, "Unexpected vsync pattern"
             if i < H_DISPLAY:
-                framebuffer[offset + 3 * i : offset + 3 * i + 3] = palette[int(dut.uo_out.value) & 0xF7]
+                raw = int(dut.uo_out.value)
+                color_idx = raw & 0x77  # keep only [6:4] and [2:0]
+                framebuffer[offset + 3 * i : offset + 3 * i + 3] = palette[color_idx]
             await ClockCycles(dut.clk, 1)
 
     async def capture_frame(frame_num: int, check_sync: bool = True):
         framebuffer = bytearray(V_DISPLAY * H_DISPLAY * 3)
 
-        for j in range(V_DISPLAY):
-            dut._log.info(f"Frame {frame_num}, line {j} (display)")
-            await capture_line(framebuffer, 3 * j * H_DISPLAY)
+        for y in range(V_DISPLAY):
+            dut._log.info(f"Frame {frame_num}, line {y} (display)")
+            await capture_line(framebuffer, 3 * y * H_DISPLAY)
 
         if check_sync:
-            for j2 in range(V_DISPLAY, V_DISPLAY + V_FRONT):
-                dut._log.info(f"Frame {frame_num}, line {j2} (front porch)")
+            for y in range(V_DISPLAY, V_DISPLAY + V_FRONT):
+                dut._log.info(f"Frame {frame_num}, line {y} (front porch)")
                 await check_line(0)
-            for j2 in range(V_DISPLAY + V_FRONT, V_DISPLAY + V_FRONT + V_SYNC):
-                dut._log.info(f"Frame {frame_num}, line {j2} (sync pulse)")
+
+            for y in range(V_DISPLAY + V_FRONT, V_DISPLAY + V_FRONT + V_SYNC):
+                dut._log.info(f"Frame {frame_num}, line {y} (sync pulse)")
                 await check_line(1)
-            for j2 in range(V_DISPLAY + V_FRONT + V_SYNC, V_TOTAL):
-                dut._log.info(f"Frame {frame_num}, line {j2} (back porch)")
+
+            for y in range(V_DISPLAY + V_FRONT + V_SYNC, V_TOTAL):
+                dut._log.info(f"Frame {frame_num}, line {y} (back porch)")
                 await check_line(0)
         else:
             await ClockCycles(dut.clk, H_TOTAL * (V_TOTAL - V_DISPLAY))
@@ -117,11 +121,11 @@ async def compare_reference(dut):
     _ensure_results_xml()
 
     for img in glob.glob("output/frame*.png"):
-        basename = os.path.basename(img)  # <- replaces removeprefix (py<3.9 safe)
+        basename = img.removeprefix("output/")
         dut._log.info(f"Comparing {basename} to reference image")
         frame = Image.open(img)
-        ref = Image.open(os.path.join("reference", basename))
+        ref = Image.open(f"reference/{basename}")
         diff = ImageChops.difference(frame, ref)
         if diff.getbbox() is not None:
-            diff.save(os.path.join("output", f"diff_{basename}"))
+            diff.save(f"output/diff_{basename}")
             assert False, f"Rendered {basename} differs from reference image"
